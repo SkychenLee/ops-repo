@@ -1,0 +1,10 @@
+include pyproject.toml setup.py
+include build.sh README.md
+recursive-include torch_custom/ops_repo *.py *.cpp *.h *.hpp *.md CMakeLists.txt
+include torch_custom/ops_repo/ops_repo_opp_env.pth
+recursive-include ops *.py *.json *.cpp *.h *.hpp *.md
+recursive-include scripts *.py
+recursive-include examples *.cpp *.txt *.py
+recursive-include docs *.md
+recursive-include tests *.py
+recursive-include integrations *.md *.patch

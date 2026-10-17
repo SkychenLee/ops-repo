@@ -1,0 +1,12 @@
+/build/
+/dist/
+/.local/
+/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+compile_commands.json
+*.egg-info/
+*.so
+*.so.*
+/wheelhouse/

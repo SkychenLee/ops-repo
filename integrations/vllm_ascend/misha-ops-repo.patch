@@ -1,0 +1,491 @@
+diff --git a/vllm_ascend/lora/fused_moe.py b/vllm_ascend/lora/fused_moe.py
+index e79d10bb1..eb1f62adc 100644
+--- a/vllm_ascend/lora/fused_moe.py
++++ b/vllm_ascend/lora/fused_moe.py
+@@ -40,6 +40,7 @@ from vllm.lora.layers.utils import _get_lora_device
+ 
+ import vllm_ascend.envs as envs_ascend
+ from vllm_ascend.ascend_forward_context import _EXTRA_CTX
++from vllm_ascend.lora.ops_backend import get_lora_ops
+ from vllm_ascend.ops.fused_moe.comm_utils import async_all_to_all
+ 
+ _MOE_LORA_INDEX_FIELDS = (
+@@ -272,10 +273,8 @@ def _recover_moe_lora_routing_allgather(lora_context, expanded_row_idx, topk_ids
+ def _build_combined_lora_idx_allgather(lora_context, expanded_row_idx, topk_ids):
+     """Build the per-row combined gather index (AG path).
+ 
+-    aten builds the unique fp32 sort keys and argsorts them; the in-tree
+-    kernel (torch.ops._C_ascend.build_combined_lora_idx,
+-    csrc/kernels/combined_lora_idx.cpp) then folds the per-pair
+-    slot/expert/adapter lookup into a single gather pass.
++    The selected kernel builds the unique fp32 sort keys, argsorts them,
++    and folds the per-pair slot/expert/adapter lookup into a single gather pass.
+     Bit-identical to _build_combined_lora_idx_allgather_torch, which is kept
+     as the reference implementation for the equality tests.
+     """
+@@ -291,7 +290,7 @@ def _build_combined_lora_idx_allgather(lora_context, expanded_row_idx, topk_ids)
+ 
+         first_expert_idx = get_ep_group().rank_in_group * lora_context.local_num_experts
+     num_experts = lora_context.w13_lora_a_stacked[0].shape[1]
+-    return torch.ops._C_ascend.build_combined_lora_idx(
++    return get_lora_ops().build_combined_lora_idx(
+         expanded_row_idx,
+         topk_ids,
+         lora_indices,
+diff --git a/vllm_ascend/lora/lora_ops.py b/vllm_ascend/lora/lora_ops.py
+index e63e67833..4b7c2a19f 100644
+--- a/vllm_ascend/lora/lora_ops.py
++++ b/vllm_ascend/lora/lora_ops.py
+@@ -15,6 +15,8 @@
+ 
+ import torch
+ 
++from vllm_ascend.lora.ops_backend import get_lora_ops
++
+ 
+ def bgmv_shrink(
+     inputs: torch.Tensor,
+@@ -23,7 +25,7 @@ def bgmv_shrink(
+     lora_indices_tensor: torch.Tensor,
+     scaling: float = 1.0,
+ ):
+-    return torch.ops._C_ascend.bgmv_shrink(
++    return get_lora_ops().bgmv_shrink(
+         inputs,
+         lora_a_weights,
+         lora_indices_tensor,
+@@ -39,7 +41,7 @@ def bgmv_expand(
+     lora_indices_tensor: torch.Tensor,
+     add_inputs: bool = True,
+ ):
+-    return torch.ops._C_ascend.bgmv_expand(
++    return get_lora_ops().bgmv_expand(
+         inputs,
+         lora_b_weights,
+         lora_indices_tensor,
+@@ -58,7 +60,7 @@ def bgmv_expand_slice(
+     slice_size: int,
+     add_inputs: bool = True,
+ ):
+-    return torch.ops._C_ascend.bgmv_expand(
++    return get_lora_ops().bgmv_expand(
+         inputs, lora_b_weights, lora_indices_tensor, output_tensor, slice_offset, slice_size
+     )
+ 
+@@ -75,7 +77,7 @@ def sgmv_shrink(
+     token_nums: int,
+     scaling: float,
+ ):
+-    return torch.ops._C_ascend.sgmv_shrink(
++    return get_lora_ops().sgmv_shrink(
+         inputs, lora_a_weights, lora_indices_tensor, seq_len_tensor, output_tensor, scaling
+     )
+ 
+@@ -92,7 +94,7 @@ def sgmv_expand(
+     token_nums: int,
+     add_inputs: bool = False,
+ ):
+-    return torch.ops._C_ascend.sgmv_expand(
++    return get_lora_ops().sgmv_expand(
+         inputs,
+         lora_b_weights,
+         lora_indices_tensor,
+@@ -117,6 +119,6 @@ def sgmv_expand_slice(
+     slice_size: int,
+     add_inputs: bool = False,
+ ):
+-    return torch.ops._C_ascend.sgmv_expand(
++    return get_lora_ops().sgmv_expand(
+         inputs, lora_b_weights, lora_indices_tensor, seq_len_tensor, output_tensor, slice_offset, slice_size
+     )
+diff --git a/vllm_ascend/lora/punica_npu.py b/vllm_ascend/lora/punica_npu.py
+index 6fa1e7660..eebf7c1b3 100755
+--- a/vllm_ascend/lora/punica_npu.py
++++ b/vllm_ascend/lora/punica_npu.py
+@@ -12,10 +12,11 @@ from vllm.distributed import (
+ from vllm.lora.punica_wrapper.punica_base import PunicaWrapperBase
+ from vllm.logger import logger
+ 
++from vllm_ascend.lora.ops_backend import get_lora_ops
+ from vllm_ascend.lora.utils import refresh_all_lora_classes
+ from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type
+ 
+-# in-tree fused kernel for decode
++# Fused kernel for decode, supplied by the selected LoRA backend.
+ ENABLE_ADD_LORA_KERNEL = True
+ 
+ 
+@@ -183,7 +184,7 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+         x = x.view(-1, x.shape[-1])
+         y_views = [y[i].view(-1, y[i].shape[-1]) for i in range(len(lora_a_stacked))]
+         _, seq_len, lora_indices, _, _, _ = self.prefill_metadata
+-        torch.ops._C_ascend.add_lora_shrink(
++        get_lora_ops().add_lora_shrink(
+             y_views, x, list(lora_a_stacked),
+             lora_indices, seq_len, self.token_lora_indices,
+             scale, self._use_gmm_shrink_cpu, self._no_lora_cpu,
+@@ -219,7 +220,7 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+         y_org = y
+         y = y.view(-1, y.shape[-1])
+         _, seq_len, lora_indices, _, _, _ = self.prefill_metadata
+-        torch.ops._C_ascend.add_lora_expand(
++        get_lora_ops().add_lora_expand(
+             y, [x[i] for i in range(len(lora_b_stacked))], list(lora_b_stacked),
+             lora_indices, seq_len, self.token_lora_indices,
+             list(output_slices), offset_start, add_inputs,
+@@ -272,7 +273,7 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+         y2d = y.view(-1, y.shape[-1])
+         x2d = x.view(-1, x.shape[-1])
+         _, seq_len, lora_indices, _, _, _ = self.prefill_metadata
+-        torch.ops._C_ascend.add_lora(
++        get_lora_ops().add_lora(
+             y2d, x2d, list(lora_a_stacked), list(lora_b_stacked),
+             lora_indices, seq_len, self.token_lora_indices,
+             list(output_slices), offset_start, scale, add_inputs,
+@@ -448,7 +449,7 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+             a_views = [a.view(-1, 1, a.shape[-2], a.shape[-1]) for a in lora_a_stacked]
+             b_views = [b.view(-1, 1, b.shape[-2], b.shape[-1]) for b in lora_b_stacked]
+             output_slices_fused = [b.shape[-2] for b in lora_b_stacked]
+-            torch.ops._C_ascend.add_lora(
++            get_lora_ops().add_lora(
+                 y2d, x2d, a_views, b_views,
+                 combined_idx, combined_idx, combined_idx,
+                 output_slices_fused, offset, 1.0, not overwrite,
+@@ -495,7 +496,7 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+                         (n_slices, x2d.shape[0], local_rank), dtype=torch.float32, device=x2d.device
+                     )
+                 )
+-                torch.ops._C_ascend.add_lora_shrink(
++                get_lora_ops().add_lora_shrink(
+                     buffers, x2d, list(lora_a_stacked), combined_idx, group_list, combined_idx,
+                     1.0, gmm_flag, self._no_lora_cpu, True, group_list_type,
+                 )
+@@ -549,10 +550,10 @@ class PunicaWrapperNPU(PunicaWrapperBase):
+             # target a tp_rank slice, so they keep folding.
+             covers_y = offset == 0 and sum(output_slices) == y2d.shape[1]
+             if covers_y and bool(gmm_flag.item()):
+-                return torch.ops._C_ascend.add_lora_expand_delta(
++                return get_lora_ops().add_lora_expand_delta(
+                     y2d, buffers, list(lora_b_stacked), group_list, group_list_type,
+                 )
+-            torch.ops._C_ascend.add_lora_expand(
++            get_lora_ops().add_lora_expand(
+                 y2d, buffers, list(lora_b_stacked), combined_idx, group_list, combined_idx,
+                 output_slices, offset, True, gmm_flag, self._no_lora_cpu,
+                 True, group_list_type,
+diff --git a/vllm_ascend/lora/quant_moe.py b/vllm_ascend/lora/quant_moe.py
+index 89e10b750..c6d019f30 100644
+--- a/vllm_ascend/lora/quant_moe.py
++++ b/vllm_ascend/lora/quant_moe.py
+@@ -35,6 +35,7 @@ from vllm_ascend.lora.fused_moe import (
+     moe_lora_apply_w2,
+     moe_lora_apply_w13,
+ )
++from vllm_ascend.lora.ops_backend import get_lora_ops
+ from vllm_ascend.ops.activation import AscendSwigluOAIAndMul, AscendSwigluStepAndMul
+ from vllm_ascend.ops.fused_moe.moe_runtime_args import MoEMlpComputeInput
+ from vllm_ascend.quantization.quant_type import QuantType
+@@ -331,7 +332,7 @@ def _apply_dynamic_int8_moe_lora(
+ 
+     if _fused_w13_epilogue_eligible(mlp_compute_input, lora_context, gate_up_out):
+         activated, quantized_activated, activated_scale = (
+-            torch.ops._C_ascend.add_lora_swiglu_quant(
++            get_lora_ops().add_lora_swiglu_quant(
+                 gate_up_out, delta, mlp_compute_input.swiglu_limit
+             )
+         )
+@@ -471,7 +472,7 @@ def _apply_dynamic_int8_moe_lora_overlap_delta(
+     ) and delta13.shape == gate_up_out.shape
+     if fuse_epilogue:
+         activated, quantized_activated, activated_scale = (
+-            torch.ops._C_ascend.add_lora_swiglu_quant(
++            get_lora_ops().add_lora_swiglu_quant(
+                 gate_up_out, delta13, mlp_compute_input.swiglu_limit
+             )
+         )
+diff --git a/vllm_ascend/lora/ops_backend.py b/vllm_ascend/lora/ops_backend.py
+new file mode 100644
+index 000000000..33f64ba30
+--- /dev/null
++++ b/vllm_ascend/lora/ops_backend.py
+@@ -0,0 +1,66 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Resolve the optional standalone LoRA kernels on their first use."""
++
++from functools import cache
++from importlib import import_module
++from importlib.util import find_spec
++
++import torch
++
++_LORA_OP_NAMES = (
++    "bgmv_shrink",
++    "bgmv_expand",
++    "sgmv_shrink",
++    "sgmv_expand",
++    "build_combined_lora_idx",
++    "add_lora",
++    "add_lora_shrink",
++    "add_lora_expand",
++    "add_lora_expand_delta",
++    "add_lora_swiglu_quant",
++)
++
++
++def get_lora_ops():
++    if _use_ops_repo():
++        # Import statements are traceable by Dynamo; returning a module from
++        # assume_constant_result would leave its operator attributes unguarded.
++        import ops_repo
++
++        return ops_repo
++    return torch.ops._C_ascend
++
++
++@torch.compiler.assume_constant_result
++def _use_ops_repo():
++    return _load_lora_ops() is not None
++
++
++@cache
++def _load_lora_ops():
++    """Prefer ops_repo; retain the in-tree backend when it is not installed.
++
++    Importing the MoE execution modules must not load an optional native
++    library in workers that do not use LoRA. Resolve only on the first LoRA
++    operation and keep the selected backend for the lifetime of the worker.
++    A broken or incompatible installation is an error, never a fallback.
++    """
++    if find_spec("ops_repo") is None:
++        return None
++
++    try:
++        backend = import_module("ops_repo")
++    except Exception as exc:
++        raise ImportError(
++            "ops_repo is installed but could not be imported for the Ascend "
++            "LoRA operators. Rebuild or reinstall ops_repo for this PyTorch, "
++            "torch-npu and CANN environment."
++        ) from exc
++
++    missing = [name for name in _LORA_OP_NAMES if not callable(getattr(backend, name, None))]
++    if missing:
++        raise ImportError(
++            "The installed ops_repo does not provide the required Ascend LoRA "
++            f"API: {', '.join(missing)}. Install an ops_repo build with LoRA support."
++        )
++    return backend
+diff --git a/tests/ut/lora/test_ops_backend.py b/tests/ut/lora/test_ops_backend.py
+new file mode 100644
+index 000000000..e727adaa3
+--- /dev/null
++++ b/tests/ut/lora/test_ops_backend.py
+@@ -0,0 +1,208 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Backend selection must not hide a broken standalone LoRA installation."""
++
++import importlib.util
++import sys
++from types import ModuleType
++from unittest.mock import Mock
++
++import pytest
++import torch
++
++from vllm_ascend.lora import lora_ops, ops_backend
++
++
++@pytest.fixture(autouse=True)
++def clear_backend_cache(monkeypatch):
++    if hasattr(torch, "npu"):
++        monkeypatch.setattr(
++            torch.npu,
++            "_lazy_init",
++            Mock(side_effect=AssertionError("backend tests must not initialize NPU hardware")),
++        )
++    ops_backend._load_lora_ops.cache_clear()
++    yield
++    ops_backend._load_lora_ops.cache_clear()
++
++
++def _standalone_backend():
++    backend = ModuleType("ops_repo")
++    backend.__spec__ = importlib.util.spec_from_loader("ops_repo", loader=None)
++    for name in ops_backend._LORA_OP_NAMES:
++        setattr(backend, name, Mock(name=name))
++    return backend
++
++
++def test_import_does_not_resolve_optional_library(monkeypatch):
++    find_spec = Mock(side_effect=AssertionError("optional library resolved during import"))
++    import_module = Mock(side_effect=AssertionError("optional library loaded during import"))
++    monkeypatch.setattr(importlib.util, "find_spec", find_spec)
++    monkeypatch.setattr("importlib.import_module", import_module)
++    spec = importlib.util.spec_from_file_location("isolated_lora_backend", ops_backend.__file__)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    find_spec.assert_not_called()
++    import_module.assert_not_called()
++
++
++def test_absent_library_uses_existing_namespace(monkeypatch):
++    monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=None))
++    load = Mock(side_effect=AssertionError("missing library must not be imported"))
++    monkeypatch.setattr(ops_backend, "import_module", load)
++    assert ops_backend.get_lora_ops() is torch.ops._C_ascend
++    load.assert_not_called()
++
++
++def test_standalone_library_is_preferred_and_resolved_once(monkeypatch):
++    backend = _standalone_backend()
++    monkeypatch.setitem(sys.modules, "ops_repo", backend)
++    discover = Mock(return_value=object())
++    load = Mock(return_value=backend)
++    monkeypatch.setattr(ops_backend, "find_spec", discover)
++    monkeypatch.setattr(ops_backend, "import_module", load)
++    assert ops_backend.get_lora_ops() is backend
++    assert ops_backend.get_lora_ops() is backend
++    discover.assert_called_once_with("ops_repo")
++    load.assert_called_once_with("ops_repo")
++
++
++@pytest.mark.parametrize(
++    "error",
++    [
++        ModuleNotFoundError("missing dependency", name="ops_repo._C"),
++        OSError("undefined symbol in native extension"),
++        RuntimeError("operator registration failed"),
++    ],
++)
++def test_broken_installation_is_not_silently_bypassed(monkeypatch, error):
++    monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=object()))
++    monkeypatch.setattr(ops_backend, "import_module", Mock(side_effect=error))
++    with pytest.raises(ImportError, match="installed but could not be imported") as caught:
++        ops_backend.get_lora_ops()
++    assert caught.value.__cause__ is error
++
++
++def test_old_or_partial_api_reports_missing_operators(monkeypatch):
++    backend = _standalone_backend()
++    monkeypatch.setitem(sys.modules, "ops_repo", backend)
++    del backend.add_lora_swiglu_quant
++    backend.add_lora_expand_delta = None
++    monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=object()))
++    monkeypatch.setattr(ops_backend, "import_module", Mock(return_value=backend))
++    with pytest.raises(ImportError, match="add_lora_expand_delta, add_lora_swiglu_quant"):
++        ops_backend.get_lora_ops()
++
++
++@pytest.mark.parametrize(
++    ("wrapper", "operator", "segmented", "sliced", "shrink"),
++    [
++        ("bgmv_shrink", "bgmv_shrink", False, False, True),
++        ("bgmv_expand", "bgmv_expand", False, False, False),
++        ("bgmv_expand_slice", "bgmv_expand", False, True, False),
++        ("sgmv_shrink", "sgmv_shrink", True, False, True),
++        ("sgmv_expand", "sgmv_expand", True, False, False),
++        ("sgmv_expand_slice", "sgmv_expand", True, True, False),
++    ],
++)
++def test_dense_wrappers_preserve_native_argument_order(monkeypatch, wrapper, operator, segmented, sliced, shrink):
++    backend = _standalone_backend()
++    monkeypatch.setitem(sys.modules, "ops_repo", backend)
++    monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=object()))
++    monkeypatch.setattr(ops_backend, "import_module", Mock(return_value=backend))
++    inputs, weights, output = torch.empty(2, 16), torch.empty(1, 16, 16), torch.empty(2, 32)
++    indices = torch.tensor([0, -1])
++    seq_lens = torch.tensor([1, 1])
++    args = [inputs, weights, output]
++    expected = [inputs, weights, indices]
++    if segmented:
++        args += [torch.tensor([0, 1]), seq_lens, indices, 2, 1, 2]
++        expected.append(seq_lens)
++    else:
++        args.append(indices)
++    expected.append(output)
++    if shrink:
++        args.append(0.5)
++        expected.append(0.5)
++    elif sliced:
++        args += [8, 16]
++        expected += [8, 16]
++    else:
++        expected += [0, 32]
++    result = getattr(lora_ops, wrapper)(*args)
++    selected_op = getattr(backend, operator)
++    selected_op.assert_called_once_with(*expected)
++    assert result is selected_op.return_value
++
++
++def test_fake_tensors_reach_selected_operator_without_materialization(monkeypatch):
++    from torch._subclasses.fake_tensor import FakeTensorMode
++
++    backend = _standalone_backend()
++    monkeypatch.setitem(sys.modules, "ops_repo", backend)
++    monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=object()))
++    monkeypatch.setattr(ops_backend, "import_module", Mock(return_value=backend))
++    with FakeTensorMode():
++        inputs = torch.empty(2, 16)
++        weights = torch.empty(1, 8, 16)
++        output = torch.empty(2, 8)
++        indices = torch.empty(2, dtype=torch.int64)
++        lora_ops.bgmv_shrink(inputs, weights, output, indices)
++    backend.bgmv_shrink.assert_called_once_with(inputs, weights, indices, output, 1.0)
++
++
++@pytest.fixture(scope="module")
++def compile_test_op():
++    # A CPU custom op with mutation and Meta behavior exercises the same
++    # dispatcher/graph boundary as the native LoRA op without launching NPU work.
++    library = torch.library.Library("ascend_lora_backend_test", "DEF")
++    library.define("shrink(Tensor x, Tensor w, Tensor idx, Tensor(a!) y, float scale) -> ()")
++
++    def cpu_impl(x, w, idx, y, scale):
++        y.copy_(x.matmul(w[0].T) * scale)
++
++    library.impl("shrink", cpu_impl, "CPU")
++    library.impl("shrink", lambda x, w, idx, y, scale: None, "Meta")
++    yield torch.ops.ascend_lora_backend_test.shrink
++
++
++def _compile_test_standalone_shrink(x, w, idx, y, scale):
++    return torch.ops.ascend_lora_backend_test.shrink(x, w, idx, y, scale)
++
++
++@pytest.mark.parametrize("standalone", [False, True])
++@pytest.mark.parametrize("warm", [False, True])
++def test_backend_selection_preserves_fullgraph_compile(monkeypatch, compile_test_op, standalone, warm):
++    from torch._dynamo.device_interface import get_registered_device_interfaces
++
++    # Inductor probes every available device even when compiling CPU graphs.
++    # Suppress that probe and keep _lazy_init blocked by the fixture above.
++    for device, interface in get_registered_device_interfaces():
++        if device.split(":")[0] == "npu":
++            monkeypatch.setattr(interface, "is_available", staticmethod(lambda: False))
++    monkeypatch.setattr(torch.accelerator, "is_available", lambda: False)
++    torch._dynamo.reset()
++    if standalone:
++        backend = _standalone_backend()
++        backend.bgmv_shrink = _compile_test_standalone_shrink
++        monkeypatch.setitem(sys.modules, "ops_repo", backend)
++        monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=object()))
++        monkeypatch.setattr(ops_backend, "import_module", Mock(return_value=backend))
++    else:
++        monkeypatch.setattr(ops_backend, "find_spec", Mock(return_value=None))
++        monkeypatch.setattr(torch.ops._C_ascend, "bgmv_shrink", compile_test_op, raising=False)
++    if warm:
++        ops_backend.get_lora_ops()
++
++    def apply(x, w, y, idx):
++        lora_ops.bgmv_shrink(x, w, y, idx, 0.5)
++        return y
++
++    x = torch.randn(2, 16)
++    w = torch.randn(1, 8, 16)
++    y = torch.empty(2, 8)
++    idx = torch.zeros(2, dtype=torch.int64)
++    compiled = torch.compile(apply, backend="eager", fullgraph=True)
++    try:
++        torch.testing.assert_close(compiled(x, w, y, idx), x.matmul(w[0].T) * 0.5)
++    finally:
++        torch._dynamo.reset()

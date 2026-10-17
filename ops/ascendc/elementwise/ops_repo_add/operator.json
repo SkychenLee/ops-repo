@@ -1,0 +1,18 @@
+{
+  "name": "ops_repo_add",
+  "enabled": true,
+  "soc": ["ascend910b", "ascend910_93", "ascend950"],
+  "hardware_validated": [],
+  "description": "FP32 elementwise addition; equal shapes, contiguous, nonempty. A2/A3/A5 are configured build targets; no hardware validation has been completed.",
+  "schema": {
+    "op": "OpsRepoAdd",
+    "input_desc": [
+      {"name": "x", "param_type": "required", "format": ["ND"], "type": ["float"]},
+      {"name": "y", "param_type": "required", "format": ["ND"], "type": ["float"]}
+    ],
+    "output_desc": [
+      {"name": "z", "param_type": "required", "format": ["ND"], "type": ["float"]}
+    ],
+    "attr": []
+  }
+}

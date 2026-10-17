@@ -1,0 +1,121 @@
+{
+  "upstream_repository": "https://github.com/vllm-project/vllm-ascend",
+  "upstream_branch": "misha",
+  "upstream_commit": "72b7912616e0e296e64f0ca0003afcc2ef7ce6bc",
+  "source_selection": "git archive of committed HEAD; no working-tree or untracked changes copied",
+  "migration_date": "2026-10-17",
+  "files": [
+    {
+      "source_path": "csrc/kernels/bgmv_shrink.cpp",
+      "source_sha256": "a0ffb8c6598ed502b86b6cfc7875656c83822778bc4a0d510f665d8d3992774d",
+      "destination_path": "ops/ascendc/moe_lora/bgmv_shrink.cpp",
+      "destination_sha256": "7eaf8a17b1feba12bf9e2401c3d25e0618a51ad64057a4e914df82ca64421491",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/bgmv_expand.cpp",
+      "source_sha256": "371c2d9c0dd60c7038479b7726d34f985b04ffa64370a4118e5b10538ae560fb",
+      "destination_path": "ops/ascendc/moe_lora/bgmv_expand.cpp",
+      "destination_sha256": "df3a2660f08ed4cc9d6af6a6de267841592a526873b711eb6fd5153ca54f7ab4",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/sgmv_shrink.cpp",
+      "source_sha256": "37ffb10e1d437ba01352b4fe95d822e91a554ada3f1eff9526648c36873cd8b0",
+      "destination_path": "ops/ascendc/moe_lora/sgmv_shrink.cpp",
+      "destination_sha256": "1e3779abd7aa4f4c5c22039971c9a477fa904b1409a513d93d5997f27619d641",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/sgmv_expand.cpp",
+      "source_sha256": "4ba99fd1fa925d783fd84a42d94dfc1e86a5af17e61d32734466ad56a36967db",
+      "destination_path": "ops/ascendc/moe_lora/sgmv_expand.cpp",
+      "destination_sha256": "fd038d5e971075cb4321158fb0b3281de327381bf71861b43a16f3297371c3d7",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/combined_lora_idx.cpp",
+      "source_sha256": "58243fe7a9fa131a2d3421dcfa70859843696b9b2ae0149130d1aa002d4347f7",
+      "destination_path": "ops/ascendc/moe_lora/combined_lora_idx.cpp",
+      "destination_sha256": "ecb0eda57affef00c4ccb84431f4ba26333533e17db7daa485017cd08bec1a6e",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/add_lora_fused.cpp",
+      "source_sha256": "eacc3f1ffb3b599eac2f92110a4025536d650e8a1fdb218ad7abb56cc70e57a6",
+      "destination_path": "ops/ascendc/moe_lora/add_lora_fused.cpp",
+      "destination_sha256": "314f84af252dce351e15a29d502e57961e7199d67f52a50749418b773c9a38a4",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/add_lora_swiglu_quant.cpp",
+      "source_sha256": "3cf82e72f5e31857d7f5ff1295b9b52bb9363d5953dbb2e5eea9785dc607d6d2",
+      "destination_path": "ops/ascendc/moe_lora/add_lora_swiglu_quant.cpp",
+      "destination_sha256": "d75d6349005450a2814e6b64873bf3bfdfaecd4068af85394714265de4e8c976",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/kernels/types.h",
+      "source_sha256": "f6592568b467b0db895e1c8ab5041544008da8ed280775b368e9afe1eaf05e2f",
+      "destination_path": "ops/ascendc/moe_lora/types.h",
+      "destination_sha256": "310b304c69c2f55edbf1a5cdce86cbdc14037cbcfe544048e9fb8d9f7dce533c",
+      "changes": "Rename C++ namespace to ops_repo_lora and prefix device entry points with ops_repo_; preserve kernel algorithms and tiling."
+    },
+    {
+      "source_path": "csrc/ops.h",
+      "source_sha256": "c14300da681e80ed2f0947807c1a70e341c6ad7f7de867feaa3d412d03edd7af",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/ops.h",
+      "destination_sha256": "7c315659e1598836dcfa5c37b431b6efc5cd2db1a1b56aac49135a1ee53a6028",
+      "changes": "Extract the seven LoRA direct-kernel declarations; rename namespace; include migrated types.h."
+    },
+    {
+      "source_path": "csrc/torch_binding.cpp",
+      "source_sha256": "b7172be56f00230e1b1e4d723142f9b86512bafbd01fd3f972e5894a99616edf",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/torch_binding.cpp",
+      "destination_sha256": "8f5c50200aa667aec745a9436691297aaf5942d1edd5135c2e973a444c3433fa",
+      "changes": "Extract all ten LoRA host operators and helpers, retaining routing thresholds/fallbacks; rename namespace and dispatcher; correct bgmv/sgmv mutation/return alias annotations; add independent _lora_C module initializer."
+    },
+    {
+      "source_path": "csrc/torch_binding_meta.cpp",
+      "source_sha256": "13ed21cd70f83ad590307014a4df1a248270440a16545116c4a824ee94f2d931",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/torch_binding_meta.cpp",
+      "destination_sha256": "5728136cf5f73d842f2101cea871515c287af78056fec6f033999b8cb59b1c39",
+      "changes": "Extract LoRA Meta implementations, use ops_repo namespace, add missing shrink Meta kernels, and preserve expand output aliasing."
+    },
+    {
+      "source_path": "csrc/aclnn_torch_adapter/NPUBridge.cpp",
+      "source_sha256": "0584211ae839e6b7524887b8c24ca1222d5dff3d7c4609af9548e55f22fd8cf6",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/aclnn_torch_adapter/NPUBridge.cpp",
+      "destination_sha256": "07453375868d441f766b30bbb261d7fd06f828723e070b09a9ff6d305e85ee23",
+      "changes": "Rename storage bridge namespace to ops_repo_lora; retain upstream storage layout compatibility."
+    },
+    {
+      "source_path": "csrc/aclnn_torch_adapter/NPUBridge.h",
+      "source_sha256": "20afcbf147970f6779bbeeddcca3b1701f6b4087aa0b2b05954f5e0dbbbc691d",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/aclnn_torch_adapter/NPUBridge.h",
+      "destination_sha256": "958586fe5243130971b9adb1a36dd64ea8b9ff01e68652374d251833e40cc769",
+      "changes": "Rename storage bridge namespace to ops_repo_lora; retain upstream storage layout compatibility."
+    },
+    {
+      "source_path": "csrc/aclnn_torch_adapter/NPUStorageImpl.cpp",
+      "source_sha256": "5adfaa3aff7f88342a6a01aa37104a9d6a9375ea6c93f795fc2d0afa6080a518",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/aclnn_torch_adapter/NPUStorageImpl.cpp",
+      "destination_sha256": "f1288b5855d25ad7d3e45b83a7e2d4970b3ae9a4fb512c4f2b4401b1a6432cad",
+      "changes": "Rename storage bridge namespace to ops_repo_lora; retain upstream storage layout compatibility."
+    },
+    {
+      "source_path": "csrc/aclnn_torch_adapter/NPUStorageImpl.h",
+      "source_sha256": "efd9d47443a72074b774f2057923ea15144c76e12fb4f6bed98233fa3e5f30c4",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/aclnn_torch_adapter/NPUStorageImpl.h",
+      "destination_sha256": "09c842bebdf0bfec60f8be7c1f2b81d34d443bb39f5111ec956e55b326d433e0",
+      "changes": "Rename storage bridge namespace to ops_repo_lora; retain upstream storage layout compatibility."
+    },
+    {
+      "source_path": "csrc/aclnn_torch_adapter/op_api_common.h",
+      "source_sha256": "0d0dc34a02151b72fc8e50000fd1c2db948fbe8a4090c5c6eaae8dc229e12cbb",
+      "destination_path": "torch_custom/ops_repo/csrc/moe_lora/aclnn_torch_adapter/op_api_common.h",
+      "destination_sha256": "4c888155b3960383e3665c2ad759c9bb0eddef6181bf2bb3a45d3ed7d1ff2390",
+      "changes": "Keep ACLNN tensor conversion and executor behavior; isolate helpers in ops_repo_lora::aclnn; resolve only libopapi.so, removing custom vendor-library lookup."
+    }
+  ]
+}
