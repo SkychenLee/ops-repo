@@ -30,13 +30,38 @@ C++ namespace、设备入口名称及动态库名称均与原库隔离，可并�
 
 要求目标 Python 环境已有匹配的 torch、torch_npu、setuptools、wheel、CMake ≥ 3.19、
 支持 C++17 的编译器与完整 CANN AscendC 工具链；不会自动升级框架。当前仅配置 A2/A3，
-不支持 A5/310P。LoRA 组件无需 OpsRepoAdd OPP，可以单独构建 wheel：
+不支持 A5/310P。LoRA 组件无需 OpsRepoAdd OPP，可以单独构建 wheel。
+先在目标机器上获取源码，并进入运行 vLLM 的同一个 Python 环境：
 
 ```bash
 git clone https://github.com/SkychenLee/ops-repo.git
 cd ops-repo
 # 在需要运行算子的 Python 环境中编译，CANN 路径按服务器实际安装位置调整。
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
+```
+
+### A2 编译与安装
+
+A2 使用 `OPS_REPO_SOC=ascend910b`。下面以 `ascend910b1` 为例；如果实际芯片为
+910B2，将命令中的 `OPS_REPO_SOC_VERSION=ascend910b1` 改为
+`OPS_REPO_SOC_VERSION=ascend910b2`，其他型号同样按实际芯片设置。
+
+```bash
+OPS_REPO_BUILD_LORA=1 OPS_REPO_SOC=ascend910b \
+  OPS_REPO_SOC_VERSION=ascend910b1 MAX_JOBS=4 \
+  python -m pip wheel --no-build-isolation --no-deps --no-index \
+  --wheel-dir dist/ascend910b/lora-wheel .
+python -m pip install --no-deps --force-reinstall \
+  dist/ascend910b/lora-wheel/ops_repo-0.1.0+ascend910b-*.whl
+python -c 'import ops_repo; print(ops_repo.__version__, ops_repo.__file__)'
+```
+
+A2 wheel 在目标 A2 环境中生成，不复用 A3 的 wheel。当前文档中的上机验证记录来自 A3，
+A2 安装后仍需在目标设备上执行数值与图验证。
+
+### A3 编译与安装
+
+```bash
 OPS_REPO_BUILD_LORA=1 OPS_REPO_SOC=ascend910_93 MAX_JOBS=4 \
   python -m pip wheel --no-build-isolation --no-deps --no-index \
   --wheel-dir dist/ascend910_93/lora-wheel .
@@ -44,6 +69,8 @@ python -m pip install --no-deps --force-reinstall \
   dist/ascend910_93/lora-wheel/ops_repo-0.1.0+ascend910.93-*.whl
 python -c 'import ops_repo; print(ops_repo.__version__)'
 ```
+
+### 构建参数与部署
 
 无需复制原开发容器或其 `build/`、`dist/` 目录。源码与构建输入均在 Git 仓库中，
 wheel 在目标服务器本地生成；CANN、驱动及匹配的 PyTorch/torch_npu 由目标环境提供。
