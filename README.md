@@ -2,7 +2,7 @@
 
 独立的 Ascend 自定义算子工程，面向 **A2 / A3 / A5** 管理编译目标。参考 FLA 的 AscendC / Triton 后端组织，提供供 PyTorch、vllm-ascend 调用的 `ops_repo` Python 包。
 
-包含 `OpsRepoAdd`（同 shape、非空、连续 FP32 张量逐元素相加），以及从 vllm-ascend `misha` 迁移的 **W8A8 MoE + LoRA 组件**（7 个直接启动 AscendC 内核、10 个 PyTorch 接口）。LoRA 组件可独立构建 wheel，接入目标容器中的 vllm-ascend，见 [迁移与使用说明](docs/moe_lora.md)。原 Add OPP 的三类芯片上机验收仍未完成，LoRA 本轮按要求不运行 NPU 验证；Triton 继续保留开发骨架。
+包含 `OpsRepoAdd`（同 shape、非空、连续 FP32 张量逐元素相加），以及从 vllm-ascend `misha` 迁移的 **W8A8 MoE + LoRA 组件**（7 个直接启动 AscendC 内核、10 个 PyTorch 接口）。LoRA 组件可独立构建 wheel，已通过 A3 上 155 项算子/图测试，并完成 vLLM v1 TP8 + EP 场景的模型请求验证，见 [迁移与使用说明](docs/moe_lora.md)。原 Add OPP 的三类芯片上机验收仍未完成；Triton 继续保留开发骨架。
 
 下文的 msopgen、OPP、`OPS_REPO_BUILD_TORCH` 流程针对 Add 组件。MoE + LoRA 的独立构建入口是 `OPS_REPO_BUILD_LORA=1`，无需 Add OPP，具体命令及验证范围见上述迁移说明。
 
@@ -23,8 +23,8 @@ python3 -c 'import ops_repo; print(ops_repo.__version__)'
 ```
 
 A2 使用 `OPS_REPO_SOC=ascend910b`；具体芯片型号可用 `OPS_REPO_SOC_VERSION` 指定。
-该组件无需 Add OPP 或原 vllm-ascend 编译产物。A3 已完成真实编译与离线验证，
-NPU 精度与性能仍待验证。详细环境、参数、硬件测试和 vllm-ascend 适配见
+该组件无需 Add OPP 或原 vllm-ascend 编译产物。A3 已完成真实编译、离线检查、
+NPU 算子数值/图验证及模型冒烟测试，尚未进行性能基准。详细环境、参数、硬件测试和 vllm-ascend 适配见
 [MoE + LoRA 说明](docs/moe_lora.md)。
 
 ## 目录与调用路径

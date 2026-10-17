@@ -95,7 +95,19 @@ SwiGLU 输入 `[T, 2W]` 连续，`W % 64 == 0`；量化输出 INT8、scale FP32�
 [`integrations/vllm_ascend`](../integrations/vllm_ascend/README.md)。
 backend 在首次实际 LoRA 调用时选择新库并缓存；没有安装 `ops_repo` 时使用旧 namespace，
 安装了但缺少 LoRA 组件/加载失败时明确报错，不静默掩盖坏包。
-no-LoRA 模块导入不会触发新库加载。改动后的 worker 需要重新启动才能加载新 Python 文件。
+no-LoRA 模块导入不会触发新库加载。首次选择后每个 worker 输出一条库路径日志。
+改动后的 worker 需要重新启动才能加载新 Python 文件。
+
+当前模型联调场景为 `/mnt/share/litianchen/v25_ep/ds_16_v25.sh`：
+vLLM `0.25.1`、model runner v1、TP8 + EP、MoE LoRA EP allgather、
+rank16、max-seqs8、DSpark5 和 FULL_DECODE_ONLY，未启用 fully-sharded LoRA。
+补丁支持 `additional_config.moe_lora_ep_backend="allgather"`，让该场景在 A3 上实际选用
+已有的 EP AllGather 通信与本地专家路由。默认 `"auto"` 保持 misha 原硬件选择逻辑；
+其他值在配置阶段报错。所有代码均来自当前已跟踪实现的适配，不引入实验分支文件。
+
+脚本中的 `VLLM_ASCEND_DISABLE_PIN_MEMORY=1` 已接入平台能力判断，必须在启动进程前设置。
+它让真实 LoRA checkpoint 加载跳过 pinned host memory，避免本机八 worker 加载大适配器时
+出现的 `aclrtMallocHostWithCfg` 分配失败；默认值 `0` 保持原有 pinning 行为。
 
 ## 验证
 
@@ -107,15 +119,18 @@ python3 scripts/ops.py check
 # 安装后的真实 C++ schema / Meta / FakeTensor，禁止设备初始化
 OPS_REPO_REQUIRE_LORA_TESTS=1 python -m unittest discover -s tests -p test_moe_lora.py -v
 
-# 后续有空闲设备时显式启用；本轮未运行
+# 有空闲设备时显式启用；ASCEND_RT_VISIBLE_DEVICES 可限制到指定物理卡
 OPS_REPO_RUN_NPU_TESTS=1 OPS_REPO_TEST_DEVICE=npu:0 \
   python -m pytest tests/npu -q
 ```
 
 硬件用例覆盖 rank 8/16/32/64、FP16/BF16、无 LoRA/无效 token、原地/alias、
 分阶段调用、MoE adapter/expert 展平、路由索引和 SwiGLU 量化。
-离线编译和 Fake/Meta 通过不代表 NPU 精度、ACL Graph 捕获、性能或完整模型通过。
-本轮按用户要求不运行 NPU 测试。
+图用例在非默认流捕获后更新固定地址的输入，重复回放 8 次，并比较独立 CPU 参考值。
+TP8 专项用单卡拼接模拟 rank2 shrink → rank16 expand 的 all-gather 布局；
+它不替代实际跨卡通信验证。EP 专项采用本地 32 个 expert、topk6、H4096/I2048/rank16、
+max-loras3，覆盖 8/48 token decode、64 token GMM prefill、空 expert 分组和无 LoRA。
+算子正确性和图测试不代表完整模型精度或性能通过。
 
 ### 本次验证记录（2026-10-17）
 
@@ -130,8 +145,15 @@ torch_npu `2.10.0.post4`、CANN 9.1.0；实际编译型号 `ascend910_9391`。
 | 仓库 `unittest` | 80 tests，OK，2 项因主机缺少框架/原生组件跳过 |
 | 已安装组件的 loader/schema/Meta/Fake/Dynamo | 13 tests，全部通过 |
 | vllm-ascend backend 与 quant_moe 单测 | 25 tests，全部通过 |
+| EP 配置与通信选择器 | 新增 27 项 + 原有 25 项，全部通过；显式 allgather 与默认策略均覆盖 |
+| pinned memory 策略及真实 LoRA loader | 5 项通过，包含独立进程启用/禁用验证；上述 CPU 联合回归共 82 项 |
 | 已安装新库与实际 vLLM wrapper 联调 | 选择 `ops_repo`，FakeTensor/fullgraph 图中实际出现 `torch.ops.ops_repo.bgmv_*` |
-| NPU 精度、ACL Graph、性能、完整模型 | 未执行 |
+| NPU 数值与行为 | 132 项通过（FP16/BF16、融合与 fallback、路由、量化） |
+| NPUGraph 捕获与更新输入后回放 | 23 项通过，包括组合图、TP8 rank2 → rank16 布局与 EP 真实维度 |
+| 干净 misha 原算子与新库同输入差分 | 16 项输出逐位一致，最大绝对差 0 |
+| v1 TP8 + EP 模型启动 | 14 个 full-decode 图捕获成功；8 个 worker 均加载新库的 binding 和 kernel `.so` |
+| `ds` / `lora1` HTTP 请求 | 32/32 通过，各模型 16 个；包含长短输入、多轮对话及三轮 8 并发混合请求 |
+| 性能基准 | 未执行 |
 
 离线 Dynamo 测试关闭 accelerator stream 探测，并硬拦 NPU lazy initialization；
 最终元数据及联调验证中 `torch.npu.is_initialized()` 保持 `False`。
@@ -142,7 +164,37 @@ SHA256 `44fb412d32cfc7f51223e3dedc7e6d28b0d4eb79ca18a79f2d2b64335ee78168`。
 `build/lora-build.log`、`build/offline-tests.log`、`build/native-metadata-tests.log`、
 `build/migration/vllm-adapter-cpu-tests.log`、`build/migration/vllm-selector-fake-compile.log`。
 
-当前容器原有 `vllm_ascend_C` 加载仍报
-`undefined symbol: vllm_ascend_recover_ub_bytes`，且两个旧 `test_lora.py` 用例在
-原始 HEAD 上也因 mock 返回值失败。缺符号来自现有未跟踪实验代码对其他分支辅助函数的引用，不属于本次迁移范围；未补入这些函数或对应构建配置。
-这些环境及基线测试问题仅记录为完整模型验证的限制，详见适配目录 README。新库本身不依赖该旧动态库。
+容器原有 `vllm_ascend_C` 曾因未跟踪实验源码引用其他分支的辅助函数，报
+`undefined symbol: vllm_ascend_recover_ub_bytes`。已从相同 `misha` 提交及其锁定子模块
+导出干净源码，重编原 binding/direct kernels 并备份替换旧二进制，未引入其他分支代码。
+原实验文件保持不变；新旧 namespace 可同时加载，10 个 legacy API 注册完整。
+具体复现步骤与备份目录见 [适配说明](../integrations/vllm_ascend/README.md)。
+两个旧 `test_lora.py` 用例在原始 HEAD 上因 mock 返回值失败的问题仍按基线问题记录。
+
+NPU 和图日志位于 `build/migration/npu-validation/`，`all-155-npu.log` 记录全部 155 项联合通过，
+`metrics.json` 保存图回放误差。
+`build/migration/legacy-vs-ops-repo-npu9.{py,log,json}` 保存原库/新库差分及复现脚本。
+这些日志是本机验证产物，不随源码提交。
+
+### `ds_16_v25.sh` 模型联调
+
+使用 `/mnt/share/litianchen/v25_ep/ds_16_v25.sh` 的启动配置，模型为
+`/mnt/weight/DeepSeek-V4-Flash-0731-w8a8`，物理卡 8–15，端口 8888。
+本次 vLLM 源码为 `752a3a504485790a2e8491cacbb35c137339ad34`（0.25.1）。
+原脚本 LoRA 路径 `/mnt/share/remote_share/litianchen/ds_lora_16` 不存在，
+启动副本中替换为实际存在的 `/mnt/share/litianchen/ds_lora_16`；原脚本未修改。
+保留 max-model-len128000、max-batched-tokens16384、max-seqs8、rank16、max-loras3、
+DSpark5、EP allgather 及 FULL_DECODE_ONLY 设置。
+
+`/health` 返回 200，`/v1/models` 注册 `ds` 和 `lora1`。32 个请求均返回非空结果，
+`finish_reason` 均为 `stop`，成功运行的服务日志没有 ERROR。
+长输入约 1949 prompt tokens；这次联调没有进行 128K 压测、完整模型精度评估或性能基准。
+8 个 worker 的 `/proc/<pid>/maps` 均包含 `ops_repo/_lora_C*.so` 和
+`ops_repo/libops_repo_moe_lora_kernels.so`。本次 worker 启动后才修正了 backend INFO
+日志的 logger，因此新库加载证据使用进程映射记录；后续重启会输出一次选择日志。
+
+复现请求使用 [`examples/check_vllm_lora_http.py`](../examples/check_vllm_lora_http.py)，
+具体启动与验证命令见 [适配说明](../integrations/vllm_ascend/README.md)。本次本机记录位于
+`build/migration/model-validation/v1-ep-20261017-113246/`：`launch.sh` 保存启动副本，
+`server.log` 保存模型日志，`backend-library-maps.json` 保存全部 worker 的新库映射，
+`http-smoke.json` 保存完整请求与响应，`http-smoke.log` 保存请求摘要。
