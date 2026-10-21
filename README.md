@@ -2,7 +2,7 @@
 
 独立的 Ascend 自定义算子工程，面向 **A2 / A3 / A5** 管理编译目标。参考 FLA 的 AscendC / Triton 后端组织，提供供 PyTorch、vllm-ascend 调用的 `ops_repo` Python 包。
 
-包含 `OpsRepoAdd`（同 shape、非空、连续 FP32 张量逐元素相加），以及从 vllm-ascend `misha` 迁移的 **W8A8 MoE + LoRA 组件**（7 个直接启动 AscendC 内核、10 个 PyTorch 接口）。LoRA 组件可独立构建 wheel，已通过 A3 上 155 项算子/图测试，并完成 vLLM v1 TP8 + EP 场景的模型请求验证，见 [迁移与使用说明](docs/moe_lora.md)。原 Add OPP 的三类芯片上机验收仍未完成；Triton 继续保留开发骨架。
+包含 `OpsRepoAdd`（同 shape、非空、连续 FP32 张量逐元素相加），以及从 vllm-ascend `misha` 迁移的 **W8A8 MoE + LoRA 组件**（7 个直接启动 AscendC 内核、10 个 PyTorch 接口）。LoRA 组件可独立构建 wheel，已通过 A3 上 155 项、A2（910B3）上 164 项算子/图测试，并完成 vLLM v1 TP8 + EP 场景的模型请求验证，见 [迁移与使用说明](docs/moe_lora.md)。原 Add OPP 的三类芯片上机验收仍未完成；Triton 继续保留开发骨架。
 
 下文的 msopgen、OPP、`OPS_REPO_BUILD_TORCH` 流程针对 Add 组件。MoE + LoRA 的独立构建入口是 `OPS_REPO_BUILD_LORA=1`，无需 Add OPP，具体命令及验证范围见上述迁移说明。
 

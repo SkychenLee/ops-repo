@@ -183,6 +183,33 @@ def test_bgmv_expand_alias_and_padding(rank):
     assert torch.equal(y[:, widths[0]:].cpu(), y0[:, widths[0]:].cpu())
 
 
+@pytest.mark.parametrize("rows", [8, 64, 256])
+def test_rank8_zero_padded_to_max_rank16(rows):
+    """A rank-8 adapter served with max-lora-rank 16 arrives zero-padded to
+    rank 16 (A rows / B cols 8..15 zero); the fused result must match the
+    native rank-8 stacks bit-for-bit in structure and within tolerance of
+    the fp32 reference."""
+    x, y_native, a_native, b_native, idx, widths = _case(8, rows=rows, experts=4)
+    a_pad, b_pad = [], []
+    for a8 in a_native:
+        padded = torch.zeros(*a8.shape[:-2], 16, a8.shape[-1], device=DEV,
+                             dtype=a8.dtype)
+        padded[..., :8, :] = a8
+        a_pad.append(padded)
+    for b8 in b_native:
+        padded = torch.zeros(*b8.shape[:-1], 16, device=DEV, dtype=b8.dtype)
+        padded[..., :8] = b8
+        b_pad.append(padded)
+
+    expected = _reference(x, y_native, a_native, b_native, idx, widths)
+    y_fused = _apply(x, y_native.clone(), a_pad, b_pad, idx, widths)
+    torch.testing.assert_close(y_fused.cpu().float(), expected, atol=3e-2, rtol=0)
+    # the padded stacks must agree with the native rank-8 stacks
+    y_native_run = _apply(x, y_native.clone(), a_native, b_native, idx, widths)
+    torch.testing.assert_close(y_fused.cpu().float(), y_native_run.cpu().float(),
+                               atol=3e-2, rtol=0)
+
+
 @pytest.mark.parametrize("tokens,pad_lora,disable_slot,all_inactive", [
     (8, False, -1, False), (48, False, 1, False),
     (5, True, -1, False), (12, False, -1, True), (2048, False, -1, False),

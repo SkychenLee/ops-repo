@@ -56,8 +56,8 @@ python -m pip install --no-deps --force-reinstall \
 python -c 'import ops_repo; print(ops_repo.__version__, ops_repo.__file__)'
 ```
 
-A2 wheel 在目标 A2 环境中生成，不复用 A3 的 wheel。当前文档中的上机验证记录来自 A3，
-A2 安装后仍需在目标设备上执行数值与图验证。
+A2 wheel 在目标 A2 环境中生成，不复用 A3 的 wheel。A2（910B3）已完成本机
+构建、安装与数值/图验证，见下方 2026-10-20 验证记录。
 
 ### A3 编译与安装
 
@@ -157,6 +157,9 @@ OPS_REPO_RUN_NPU_TESTS=1 OPS_REPO_TEST_DEVICE=npu:0 \
 TP8 专项用单卡拼接模拟 rank2 shrink → rank16 expand 的 all-gather 布局；
 它不替代实际跨卡通信验证。EP 专项采用本地 32 个 expert、topk6、H4096/I2048/rank16、
 max-loras3，覆盖 8/48 token decode、64 token GMM prefill、空 expert 分组和无 LoRA。
+fully-sharded w2 专项覆盖输入分片的部分 shrink 求和（all-reduce 布局）、
+partial_expand 的 tp_rank 输出分片、expand 对 shrink 缓冲的只读约束，
+以及 rank8 适配器在 max-lora-rank 16 下的零填充等价。
 算子正确性和图测试不代表完整模型精度或性能通过。
 
 ### 本次验证记录（2026-10-17）
@@ -202,6 +205,26 @@ NPU 和图日志位于 `build/migration/npu-validation/`，`all-155-npu.log` 记
 `metrics.json` 保存图回放误差。
 `build/migration/legacy-vs-ops-repo-npu9.{py,log,json}` 保存原库/新库差分及复现脚本。
 这些日志是本机验证产物，不随源码提交。
+
+### 验证记录（2026-10-20，A2/910B3）
+
+目标机器 8×Ascend 910B3，Python 3.12 / aarch64，torch `2.10.0+cpu`、
+torch_npu `2.10.0.post2`、CANN 9.0.1；本机以
+`OPS_REPO_SOC=ascend910b OPS_REPO_SOC_VERSION=ascend910b3` 构建并安装 wheel。
+
+| 检查 | 结果 |
+| --- | --- |
+| 仓库 `unittest`（offline） | 85 tests，OK（1 项跳过） |
+| 已安装组件的 loader/schema/Meta/Fake | 13 tests，全部通过 |
+| NPU 数值与图 | 164 项通过（155 项既有 + 9 项新增，见下） |
+| 新增精度用例 | fully-sharded w2 输入分片（bgmv/GMM）、partial_expand tp_rank 分片与求和、expand 对 shrink 缓冲只读、rank8 零填充至 max-rank16 等价 |
+| 与 vllm-ascend 集成回归 | `tests/ut/lora` 289 通过 / 5 xfailed；4 项失败用例在同一提交的 legacy 后端上同样失败，确认为用例契约过期而非迁移缺陷 |
+| 干净 misha 原算子与新库同输入差分 | 14 条生产路径输出逐位一致（fused w13/w2、two-op bgmv/GMM、SwiGLU 量化、combined 索引） |
+
+新增用例位于 `tests/npu/test_fully_sharded_accuracy.py` 与
+`tests/npu/test_moe_lora.py::test_rank8_zero_padded_to_max_rank16`，自 vllm-ascend
+`tests/ut/lora/test_fully_sharded_two_op.py`、`test_add_lora_fused_moe.py` 移植；
+跨卡通信仍以单卡 cat/求和模拟布局，不替代实际跨卡验证。
 
 ### `ds_16_v25.sh` 模型联调
 
