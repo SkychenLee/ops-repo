@@ -25,6 +25,9 @@
 #include <algorithm>
 #include <vector>
 #include "ops.h"
+#ifdef OPS_REPO_COMBINED_PREFILL_9362
+#include "combined_lora_idx_prefill_9362.h"
+#endif
 #include "aclnn_torch_adapter/op_api_common.h"
 
 namespace ops_repo_lora {
@@ -696,6 +699,17 @@ at::Tensor build_combined_lora_idx(at::Tensor dest, at::Tensor topk_ids,
         std::min<int64_t>(n / top_k, lorac.numel()));
     at::Tensor out = at::empty({n}, dest.options().dtype(at::kLong));
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+#ifdef OPS_REPO_COMBINED_PREFILL_9362
+    const uint32_t prefill_aiv = CliPrefill9362AivNum(
+        n, top_k, destc.scalar_type() == at::kInt, topkc.scalar_type() == at::kLong);
+    if (prefill_aiv != 0) {
+        combined_lora_idx_prefill_9362_impl(
+            stream, destc.data_ptr(), topkc.data_ptr(), lorac.data_ptr(), aec.data_ptr(),
+            inv.data_ptr(), out.data_ptr(), num_pairs, static_cast<uint32_t>(top_k), num_valid,
+            first_expert_idx, static_cast<uint32_t>(num_experts), prefill_aiv);
+        return out;
+    }
+#endif
     ops_repo_lora::combined_lora_idx_finalize_impl(
         stream, destc.data_ptr(), topkc.data_ptr(), lorac.data_ptr(), aec.data_ptr(),
         inv.data_ptr(), out.data_ptr(), num_pairs, static_cast<uint32_t>(top_k), num_valid,

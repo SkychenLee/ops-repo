@@ -225,3 +225,48 @@ DSpark5、EP allgather 及 FULL_DECODE_ONLY 设置。
 `build/migration/model-validation/v1-ep-20261017-113246/`：`launch.sh` 保存启动副本，
 `server.log` 保存模型日志，`backend-library-maps.json` 保存全部 worker 的新库映射，
 `http-smoke.json` 保存完整请求与响应，`http-smoke.log` 保存请求摘要。
+
+## Combined LoRA 索引 prefill 优化（2026-10-22）
+
+`build_combined_lora_idx` 新增针对 `Ascend910_9362` 的大输入 finalize 路径。
+保留原来的 FP32 keys、mask 和 argsort，只优化排序之后的索引生成：以 256 行为块，
+循环分配到当前设备的 Vector Core；各核将 token→LoRA 映射一次搬入 UB；
+无效 `dest` 提前输出 `-1`，避免继续读取 expert/adapter 元数据。公开 API、Meta、
+输入检查及原 `combined_lora_idx.cpp` 保持不变。
+
+优化路径同时要求编译型号和运行设备为 `Ascend910_9362`，`dest=int32`、
+`topk_ids=int64`、`top_k=6`，且 `dest.numel()` 位于 `[49152, 98304]`，
+对应 8192–16384 tokens。核数从当前设备查询。其他 dtype/shape、型号或设备查询失败
+均沿用原实现；A2 默认仍走原路径。仅设置 `OPS_REPO_SOC=ascend910_93` 会使用
+原默认型号 9391，启用本次优化须显式指定 9362。
+
+构建示例（在目标环境的 Python/CANN 已配置后执行）：
+
+```bash
+OPS_REPO_BUILD_LORA=1 OPS_REPO_BUILD_TORCH=0 \
+  OPS_REPO_SOC=ascend910_93 OPS_REPO_SOC_VERSION=ascend910_9362 MAX_JOBS=8 \
+  python -m pip wheel --no-build-isolation --no-deps --no-index \
+  --wheel-dir dist/ascend910_9362/lora-wheel .
+```
+
+三轮方案评估最终选择第二轮的映射驻留方案。下表来自独立单算子工程的 A3 9362
+实测，采用 EP8 测试布局（全局 256、本地 32 experts，top-k 6），不是生产请求采样。
+计时取完整接口内所有设备 kernel 耗时之和；每例 10 组 warmup→接口调用后取中位数，
+不含 CPU 调度和输入构造耗时，不等同于模型 prefill 加速比。
+
+| Tokens | 原实现（μs） | 所选方案（μs） | 加速比 |
+| --- | ---: | ---: | ---: |
+| 8192 | 503.61 | 201.25 | 2.50× |
+| 12288 | 779.65 | 276.61 | 2.82× |
+| 16384 | 962.04 | 361.12 | 2.66× |
+
+所选方案已在独立工程完成 180 项功能检查、40 项 TTK 逐位比对，以及补充边界、
+图更新与序列压测。以上数字属于独立工程，不能作为本次回集成二进制的验收结果。
+本次回集成源码在 `ds-ltc-v25-ep` 容器内，沿原 `setup.py build_py + build_ext`
+入口分别完成 `ascend910_9362` 和 `ascend910b2` 全组件构建，使用独立输出目录，
+没有安装到全局环境。编译输入、host 宏和 ELF 符号核验确认：9362 包含新路径，
+B2 只包含原路径。现有构建/打包单测 7 项通过；明确加载新 9362 二进制后的
+loader/schema/Meta/Fake/Dynamo 检查 13 项通过，无跳过，且 NPU 未初始化。
+
+最终 demo 的功能全集计时、原工程回集成后的完整 NPU 精度/性能验收和 A2 实机
+验证仍待完成。本次 B2 构建仅证明原路径可编译，不代表 A2 上的优化收益已验证。
